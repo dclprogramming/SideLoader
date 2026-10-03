@@ -10,7 +10,10 @@ import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -19,6 +22,7 @@ import android.view.inputmethod.EditorInfo
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -27,6 +31,8 @@ class MainActivity : Activity() {
     private val AQUA = 0xFF4FD1C5.toInt()
     private val TINT = 0xFFEAF4FD.toInt()
     private val MUTED = 0xFF5B7FA3.toInt()
+    private val BG = 0xFF062036.toInt()
+    private var pending: File? = null
 
     private lateinit var web: WebView
     private lateinit var input: EditText
@@ -96,9 +102,9 @@ class MainActivity : Activity() {
         }
         bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             progressTintList = ColorStateList.valueOf(AQUA)
-            progressBackgroundTintList = ColorStateList.valueOf(TINT)
+            progressBackgroundTintList = ColorStateList.valueOf(0xFF12395A.toInt())
         }
-        status = TextView(this).apply { text = "Ready"; textSize = 13f; setTextColor(NAVY) }
+        status = TextView(this).apply { text = "Ready"; textSize = 13f; setTextColor(TINT) }
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
             webViewClient = object : WebViewClient() {
@@ -108,12 +114,33 @@ class MainActivity : Activity() {
         }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(BG)
             addView(header, lp(MATCH_PARENT, WRAP_CONTENT))
             addView(row, lp(MATCH_PARENT, WRAP_CONTENT))
             addView(bar, lp(MATCH_PARENT, dp(6), l = 16, t = 6, r = 16))
             addView(status, lp(MATCH_PARENT, WRAP_CONTENT, l = 16, t = 4, r = 16, b = 6))
             addView(web, lp(MATCH_PARENT, 0, wt = 1f))
         })
+        askInstallPermission()
+    }
+
+    // ---- Install permission ----
+    private fun canInstall() = Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()
+
+    private fun openInstallSettings() = startActivity(
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+
+    private fun askInstallPermission() {
+        if (canInstall()) return
+        AlertDialog.Builder(this).setTitle("Allow app installs")
+            .setMessage("SideLoader needs permission to install apps. Tap Allow, then switch on \"Allow from this source\" and come back.")
+            .setPositiveButton("Allow") { _, _ -> openInstallSettings() }
+            .setNegativeButton("Later", null).show()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        pending?.let { if (canInstall()) { pending = null; Downloads.install(this, it) } }
     }
 
     private fun go(text: String) {
@@ -236,7 +263,10 @@ class MainActivity : Activity() {
             { r -> runOnUiThread {
                 r.onSuccess { f ->
                     status.text = "Saved ${f.name}"
-                    if (f.extension.equals("apk", true)) Downloads.install(this, f)
+                    if (f.extension.equals("apk", true)) {
+                        if (canInstall()) Downloads.install(this, f)
+                        else { pending = f; status.text = "Allow installs, then return to SideLoader"; openInstallSettings() }
+                    }
                 }.onFailure { status.text = "Failed: ${it.message}" }
             } })
     }

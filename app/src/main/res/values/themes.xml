@@ -4,8 +4,8 @@
         <item name="android:colorPrimaryDark">#0F4C81</item>
         <item name="android:colorAccent">#0F4C81</item>
         <item name="android:statusBarColor">#0F4C81</item>
-        <item name="android:navigationBarColor">#FFFFFF</item>
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:navigationBarColor">#062036</item>
+        <item name="android:windowBackground">#062036</item>
         <item name="android:alertDialogTheme">@style/AppDialog</item>
     </style>
     <style name="AppDialog" parent="android:Theme.Material.Light.Dialog.Alert">

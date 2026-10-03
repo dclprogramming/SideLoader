@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.FileProvider
@@ -59,7 +60,7 @@ object Downloads {
 
     /** Opens the system installer; sends the user to the "install unknown apps" screen first if needed. */
     fun install(a: Activity, file: File) {
-        if (!a.packageManager.canRequestPackageInstalls()) {
+        if (Build.VERSION.SDK_INT >= 26 && !a.packageManager.canRequestPackageInstalls()) {
             a.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:${a.packageName}")))
             return
