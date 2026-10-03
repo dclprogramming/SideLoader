@@ -33,6 +33,10 @@ class MainActivity : Activity() {
     private val MUTED = 0xFF5B7FA3.toInt()
     private val BG = 0xFF062036.toInt()
     private var pending: File? = null
+    private val HOME = """<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+        <body style="margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#062036;color:#EAF4FD;font-family:sans-serif;text-align:center">
+        <div style="font-size:30px;font-weight:bold;color:#4FD1C5">SideLoader</div>
+        <p style="opacity:.8;padding:0 24px">Enter a URL above, or open Favorites.</p></body></html>"""
 
     private lateinit var web: WebView
     private lateinit var input: EditText
@@ -108,9 +112,11 @@ class MainActivity : Activity() {
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
             webViewClient = object : WebViewClient() {
-                override fun onPageFinished(v: WebView, url: String) { input.setText(url) }
+                override fun onPageFinished(v: WebView, url: String) { if (url.startsWith("http")) input.setText(url) }
             }
             setDownloadListener { url, _, disp, _, _ -> fetch(url, disp) }
+            setBackgroundColor(BG)
+            loadDataWithBaseURL(null, HOME, "text/html", "utf-8", null)
         }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
