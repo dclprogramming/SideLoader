@@ -2,12 +2,16 @@ package com.sideloader.app
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.os.Bundle
 import android.view.inputmethod.EditorInfo
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
 import android.widget.LinearLayout.LayoutParams.MATCH_PARENT
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : Activity() {
     private lateinit var web: WebView
@@ -15,6 +19,7 @@ class MainActivity : Activity() {
     private lateinit var bar: ProgressBar
     private lateinit var status: TextView
     private lateinit var favs: Favorites
+    private val pickFile = 1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,6 +36,7 @@ class MainActivity : Activity() {
             btn("Go") { go(input.text.toString()) }
             btn("★ Save") { saveFavorite() }
             btn("Favorites") { showFavorites() }
+            btn("Import") { showImport() }
         }
         bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
         status = TextView(this)
@@ -85,6 +91,60 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---- Import (text file or URL; one "Name | URL" or "URL" per line) ----
+    private fun showImport() {
+        AlertDialog.Builder(this).setTitle("Import favorites")
+            .setItems(arrayOf("From a text file", "From a URL")) { _, i ->
+                if (i == 0) pickTextFile() else askImportUrl()
+            }.show()
+    }
+
+    private fun pickTextFile() {
+        try {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("text/*"), pickFile)
+        } catch (e: ActivityNotFoundException) {
+            toast("No file picker on this device. Use \"From a URL\" instead.")
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data ?: return
+        if (requestCode != pickFile || resultCode != RESULT_OK) return
+        runCatching { contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() } }
+            .onSuccess { importText(it) }
+            .onFailure { toast("Could not read file: ${it.message}") }
+    }
+
+    private fun askImportUrl() {
+        val field = EditText(this).apply { hint = "https://example.com/favorites.txt"; setSingleLine() }
+        AlertDialog.Builder(this).setTitle("Import from URL").setView(field)
+            .setPositiveButton("Import") { _, _ ->
+                var link = field.text.toString().trim()
+                if (!link.startsWith("http", true)) link = "https://$link"
+                Thread {
+                    runCatching {
+                        val c = URL(link).openConnection() as HttpURLConnection
+                        c.connectTimeout = 15000; c.readTimeout = 15000
+                        check(c.responseCode == 200) { "HTTP ${c.responseCode}" }
+                        c.inputStream.bufferedReader().use { it.readText() }
+                    }.onSuccess { runOnUiThread { importText(it) } }
+                        .onFailure { runOnUiThread { toast("Import failed: ${it.message}") } }
+                }.start()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun importText(text: String) {
+        val found = Favorites.parse(text)
+        val added = favs.addAll(found)
+        toast(when {
+            found.isEmpty() -> "No valid URLs found in that file"
+            else -> "Imported $added new (${found.size - added} duplicates skipped)"
+        })
+    }
+
     // ---- Downloads ----
     private fun fetch(url: String, disposition: String?) {
         status.text = "Downloading…"; bar.progress = 0
@@ -98,7 +158,7 @@ class MainActivity : Activity() {
             } })
     }
 
-    private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
+    private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_LONG).show()
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() { if (web.canGoBack()) web.goBack() else super.onBackPressed() }
