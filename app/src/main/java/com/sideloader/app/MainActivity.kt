@@ -4,16 +4,30 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
+import android.text.TextUtils
+import android.view.Gravity
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.inputmethod.EditorInfo
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
-import android.widget.LinearLayout.LayoutParams.MATCH_PARENT
 import java.net.HttpURLConnection
 import java.net.URL
 
 class MainActivity : Activity() {
+    private val NAVY = 0xFF0F4C81.toInt()
+    private val AQUA = 0xFF4FD1C5.toInt()
+    private val TINT = 0xFFEAF4FD.toInt()
+    private val MUTED = 0xFF5B7FA3.toInt()
+
     private lateinit var web: WebView
     private lateinit var input: EditText
     private lateinit var bar: ProgressBar
@@ -21,25 +35,70 @@ class MainActivity : Activity() {
     private lateinit var favs: Favorites
     private val pickFile = 1
 
+    private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
+    private fun lp(w: Int, h: Int, l: Int = 0, t: Int = 0, r: Int = 0, b: Int = 0, wt: Float = 0f) =
+        LinearLayout.LayoutParams(w, h, wt).apply { setMargins(dp(l), dp(t), dp(r), dp(b)) }
+    private fun shape(fill: Int, radius: Int, stroke: Int = 0, strokeW: Int = 0) = GradientDrawable().apply {
+        setColor(fill); cornerRadius = radius.toFloat(); if (strokeW > 0) setStroke(strokeW, stroke)
+    }
+    private fun focusable(normal: Drawable, focused: Drawable) = StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_focused), focused)
+        addState(intArrayOf(android.R.attr.state_pressed), focused)
+        addState(intArrayOf(), normal)
+    }
+    private fun pill(label: String, fill: Int, text: Int, action: () -> Unit) = Button(this).apply {
+        this.text = label; isAllCaps = false; setTextColor(text); textSize = 14f
+        typeface = Typeface.DEFAULT_BOLD; stateListAnimator = null; minHeight = 0; minimumHeight = 0
+        setPadding(dp(4), dp(10), dp(4), dp(10))
+        val ring = if (fill == AQUA) NAVY else AQUA
+        background = focusable(shape(fill, dp(22)), shape(fill, dp(22), ring, dp(3)))
+        setOnClickListener { action() }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         favs = Favorites(this)
+
         input = EditText(this).apply {
-            hint = "Enter URL or search"; setSingleLine()
+            hint = "Enter URL or search"; setSingleLine(); textSize = 15f
+            setTextColor(NAVY); setHintTextColor(MUTED)
+            background = shape(Color.WHITE, dp(24))
+            setPadding(dp(18), dp(10), dp(18), dp(10))
             imeOptions = EditorInfo.IME_ACTION_GO
             setOnEditorActionListener { _, _, _ -> go(text.toString()); true }
         }
-        val row = LinearLayout(this).apply {
-            fun btn(label: String, action: () -> Unit) = addView(
-                Button(this@MainActivity).apply { text = label; setOnClickListener { action() } },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            btn("Go") { go(input.text.toString()) }
-            btn("★ Save") { saveFavorite() }
-            btn("Favorites") { showFavorites() }
-            btn("Import") { showImport() }
+        val titleRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(ImageView(this@MainActivity).apply { setImageResource(R.drawable.ic_launcher) }, lp(dp(40), dp(40), r = 12))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(this@MainActivity).apply {
+                    text = "SideLoader"; textSize = 22f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD })
+                addView(TextView(this@MainActivity).apply {
+                    text = "Download & install apps"; textSize = 12f; setTextColor(AQUA) })
+            })
         }
-        bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
-        status = TextView(this)
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val r = dp(26).toFloat()
+            background = GradientDrawable().apply { setColor(NAVY); cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r) }
+            setPadding(dp(18), dp(16), dp(18), dp(20))
+            addView(titleRow)
+            addView(input, lp(MATCH_PARENT, WRAP_CONTENT, t = 14))
+        }
+        val row = LinearLayout(this).apply {
+            setPadding(dp(12), dp(12), dp(12), dp(4))
+            fun add(b: Button) = addView(b, lp(0, WRAP_CONTENT, l = 4, r = 4, wt = 1f))
+            add(pill("Go", AQUA, NAVY) { go(input.text.toString()) })
+            add(pill("★ Save", NAVY, Color.WHITE) { saveFavorite() })
+            add(pill("Favorites", NAVY, Color.WHITE) { showFavorites() })
+            add(pill("Import", NAVY, Color.WHITE) { showImport() })
+        }
+        bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            progressTintList = ColorStateList.valueOf(AQUA)
+            progressBackgroundTintList = ColorStateList.valueOf(TINT)
+        }
+        status = TextView(this).apply { text = "Ready"; textSize = 13f; setTextColor(NAVY) }
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
             webViewClient = object : WebViewClient() {
@@ -49,8 +108,11 @@ class MainActivity : Activity() {
         }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(input); addView(row); addView(bar); addView(status)
-            addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+            addView(header, lp(MATCH_PARENT, WRAP_CONTENT))
+            addView(row, lp(MATCH_PARENT, WRAP_CONTENT))
+            addView(bar, lp(MATCH_PARENT, dp(6), l = 16, t = 6, r = 16))
+            addView(status, lp(MATCH_PARENT, WRAP_CONTENT, l = 16, t = 4, r = 16, b = 6))
+            addView(web, lp(MATCH_PARENT, 0, wt = 1f))
         })
     }
 
@@ -69,7 +131,7 @@ class MainActivity : Activity() {
     private fun saveFavorite() {
         val url = input.text.toString().trim().ifEmpty { web.url ?: "" }
         if (url.isEmpty()) { toast("Nothing to save"); return }
-        val name = EditText(this).apply { setText(web.title?.takeIf { url == web.url } ?: url); setSingleLine() }
+        val name = EditText(this).apply { setText(web.title?.takeIf { url == web.url } ?: url); setSingleLine(); setPadding(dp(24), dp(12), dp(24), dp(12)) }
         AlertDialog.Builder(this).setTitle("Save favorite").setView(name)
             .setPositiveButton("Save") { _, _ ->
                 favs.add(Fav(name.text.toString().ifBlank { url }, url)); toast("Saved")
@@ -79,19 +141,42 @@ class MainActivity : Activity() {
     private fun showFavorites() {
         val list = favs.all()
         if (list.isEmpty()) { toast("No favorites yet. Enter a URL and tap ★ Save."); return }
-        val dlg = AlertDialog.Builder(this).setTitle("Favorites (long-press to delete)")
-            .setItems(list.map { "${it.name}\n${it.url}" }.toTypedArray()) { _, i -> go(list[i].url) }
-            .create()
-        dlg.show()
-        dlg.listView.setOnItemLongClickListener { _, _, i, _ ->
-            AlertDialog.Builder(this).setMessage("Delete \"${list[i].name}\"?")
-                .setPositiveButton("Delete") { _, _ -> favs.remove(list[i]); dlg.dismiss(); showFavorites() }
-                .setNegativeButton("Cancel", null).show()
-            true
+        lateinit var dlg: AlertDialog
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)) }
+        list.forEach { f ->
+            val card = LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL; isFocusable = true; isClickable = true
+                setPadding(dp(16), dp(12), dp(8), dp(12))
+                background = focusable(shape(TINT, dp(16)), shape(0xFFD3EBFA.toInt(), dp(16), AQUA, dp(3)))
+                setOnClickListener { dlg.dismiss(); go(f.url) }
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(TextView(this@MainActivity).apply {
+                        text = f.name; textSize = 16f; setTextColor(NAVY); typeface = Typeface.DEFAULT_BOLD
+                        setSingleLine(); ellipsize = TextUtils.TruncateAt.END })
+                    addView(TextView(this@MainActivity).apply {
+                        text = f.url; textSize = 12f; setTextColor(MUTED)
+                        setSingleLine(); ellipsize = TextUtils.TruncateAt.END })
+                }, lp(0, WRAP_CONTENT, wt = 1f))
+                addView(TextView(this@MainActivity).apply {
+                    text = "✕"; textSize = 18f; setTextColor(MUTED); gravity = Gravity.CENTER
+                    isFocusable = true; isClickable = true; setPadding(dp(14), dp(8), dp(14), dp(8))
+                    background = focusable(shape(Color.TRANSPARENT, dp(20)), shape(Color.WHITE, dp(20), AQUA, dp(2)))
+                    setOnClickListener {
+                        AlertDialog.Builder(this@MainActivity).setMessage("Delete \"${f.name}\"?")
+                            .setPositiveButton("Delete") { _, _ -> favs.remove(f); dlg.dismiss(); showFavorites() }
+                            .setNegativeButton("Cancel", null).show()
+                    }
+                })
+            }
+            col.addView(card, lp(MATCH_PARENT, WRAP_CONTENT, b = 12))
         }
+        dlg = AlertDialog.Builder(this).setTitle("★ Favorites")
+            .setView(ScrollView(this).apply { addView(col) })
+            .setNegativeButton("Close", null).show()
     }
 
-    // ---- Import (text file or URL; one "Name | URL" or "URL" per line) ----
+    // ---- Import (text file or URL) ----
     private fun showImport() {
         AlertDialog.Builder(this).setTitle("Import favorites")
             .setItems(arrayOf("From a text file", "From a URL")) { _, i ->
@@ -119,7 +204,7 @@ class MainActivity : Activity() {
     }
 
     private fun askImportUrl() {
-        val field = EditText(this).apply { hint = "https://example.com/favorites.txt"; setSingleLine() }
+        val field = EditText(this).apply { hint = "https://example.com/favorites.txt"; setSingleLine(); setPadding(dp(24), dp(12), dp(24), dp(12)) }
         AlertDialog.Builder(this).setTitle("Import from URL").setView(field)
             .setPositiveButton("Import") { _, _ ->
                 var link = field.text.toString().trim()
@@ -139,10 +224,8 @@ class MainActivity : Activity() {
     private fun importText(text: String) {
         val found = Favorites.parse(text)
         val added = favs.addAll(found)
-        toast(when {
-            found.isEmpty() -> "No valid URLs found in that file"
-            else -> "Imported $added new (${found.size - added} duplicates skipped)"
-        })
+        toast(if (found.isEmpty()) "No valid URLs found in that file"
+              else "Imported $added new (${found.size - added} duplicates skipped)")
     }
 
     // ---- Downloads ----

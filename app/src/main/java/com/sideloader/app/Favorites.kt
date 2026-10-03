@@ -34,18 +34,26 @@ class Favorites(ctx: Context) {
     }
 
     companion object {
+        private val urlRx = Regex("^(https?://\\S+|[\\w-]+(\\.[\\w-]+)+(/\\S*)?)$", RegexOption.IGNORE_CASE)
+
         /**
-         * One favorite per line: "Name | URL" or just "URL".
+         * One favorite per line. The URL can sit anywhere on the line and any other
+         * words become the title, e.g. "http://someplace.com JoesGarage",
+         * "Joes Garage | someplace.com" or just "someplace.com".
          * Blank lines and lines starting with # are ignored.
          */
         fun parse(text: String): List<Fav> = text.removePrefix("\uFEFF").lineSequence()
             .map { it.trim() }
             .filter { it.isNotEmpty() && !it.startsWith("#") }
             .mapNotNull { line ->
-                val name = if ("|" in line) line.substringBefore("|").trim() else ""
-                val raw = if ("|" in line) line.substringAfter("|").trim() else line
-                if (raw.isEmpty() || " " in raw || "." !in raw) return@mapNotNull null
-                val url = if (Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(raw)) raw else "https://$raw"
+                val tokens = line.split(Regex("[\\s\\u00A0|]+")).filter { it.isNotEmpty() }
+                var idx = tokens.indexOfFirst { it.startsWith("http", true) && urlRx.matches(it) }
+                if (idx < 0) idx = tokens.indexOfFirst { urlRx.matches(it) }
+                if (idx < 0) return@mapNotNull null
+                val raw = tokens[idx]
+                val url = if (raw.startsWith("http", true)) raw else "https://$raw"
+                val name = (tokens.take(idx) + tokens.drop(idx + 1)).joinToString(" ")
+                    .trim(' ', '-', ',', ':', '\u2013', '\u2014')
                 Fav(name.ifBlank { url }, url)
             }.toList()
     }
