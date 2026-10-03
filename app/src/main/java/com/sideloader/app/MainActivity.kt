@@ -16,12 +16,19 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.inputmethod.EditorInfo
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
+import android.os.Environment
+import android.text.format.DateUtils
+import android.text.format.Formatter
+import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
+import androidx.core.widget.doAfterTextChanged
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -57,7 +64,7 @@ class MainActivity : Activity() {
         addState(intArrayOf(), normal)
     }
     private fun pill(label: String, fill: Int, text: Int, action: () -> Unit) = Button(this).apply {
-        this.text = label; isAllCaps = false; setTextColor(text); textSize = 14f
+        this.text = label; isAllCaps = false; setTextColor(text); textSize = 13f
         typeface = Typeface.DEFAULT_BOLD; stateListAnimator = null; minHeight = 0; minimumHeight = 0
         setPadding(dp(4), dp(10), dp(4), dp(10))
         val ring = if (fill == AQUA) NAVY else AQUA
@@ -72,10 +79,23 @@ class MainActivity : Activity() {
         input = EditText(this).apply {
             hint = "Enter URL or search"; setSingleLine(); textSize = 15f
             setTextColor(NAVY); setHintTextColor(MUTED)
-            background = shape(Color.WHITE, dp(24))
-            setPadding(dp(18), dp(10), dp(18), dp(10))
+            background = null
+            setPadding(dp(18), dp(10), dp(46), dp(10))
             imeOptions = EditorInfo.IME_ACTION_GO
             setOnEditorActionListener { _, _, _ -> go(text.toString()); true }
+        }
+        val clear = TextView(this).apply {
+            text = "✕"; textSize = 16f; setTextColor(MUTED); gravity = Gravity.CENTER
+            isFocusable = true; isClickable = true; visibility = View.GONE
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = focusable(shape(Color.TRANSPARENT, dp(18)), shape(TINT, dp(18), AQUA, dp(2)))
+            setOnClickListener { input.setText(""); input.requestFocus() }
+        }
+        input.doAfterTextChanged { clear.visibility = if (it.isNullOrEmpty()) View.GONE else View.VISIBLE }
+        val box = FrameLayout(this).apply {
+            background = shape(Color.WHITE, dp(24))
+            addView(input, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(clear, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply { rightMargin = dp(6) })
         }
         val titleRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -94,7 +114,7 @@ class MainActivity : Activity() {
             background = GradientDrawable().apply { setColor(NAVY); cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r) }
             setPadding(dp(18), dp(16), dp(18), dp(20))
             addView(titleRow)
-            addView(input, lp(MATCH_PARENT, WRAP_CONTENT, t = 14))
+            addView(box, lp(MATCH_PARENT, WRAP_CONTENT, t = 14))
         }
         val row = LinearLayout(this).apply {
             setPadding(dp(12), dp(12), dp(12), dp(4))
@@ -102,7 +122,7 @@ class MainActivity : Activity() {
             add(pill("Go", AQUA, NAVY) { go(input.text.toString()) })
             add(pill("★ Save", NAVY, Color.WHITE) { saveFavorite() })
             add(pill("Favorites", NAVY, Color.WHITE) { showFavorites() })
-            add(pill("Import", NAVY, Color.WHITE) { showImport() })
+            add(pill("Downloads", NAVY, Color.WHITE) { showDownloads() })
         }
         bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             progressTintList = ColorStateList.valueOf(AQUA)
@@ -171,42 +191,87 @@ class MainActivity : Activity() {
             }.setNegativeButton("Cancel", null).show()
     }
 
+    private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)) }
+    private fun empty(msg: String) = TextView(this).apply { text = msg; textSize = 14f; setTextColor(MUTED); gravity = Gravity.CENTER; setPadding(0, dp(24), 0, dp(24)) }
+    private fun confirm(msg: String, yes: () -> Unit) = AlertDialog.Builder(this).setMessage(msg)
+        .setPositiveButton("Delete") { _, _ -> yes() }.setNegativeButton("Cancel", null).show()
+
+    /** A rounded list card: tap to open, ✕ to delete. */
+    private fun card(title: String, sub: String, onOpen: () -> Unit, onDelete: () -> Unit) = LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL; isFocusable = true; isClickable = true
+        setPadding(dp(16), dp(12), dp(8), dp(12))
+        background = focusable(shape(TINT, dp(16)), shape(0xFFD3EBFA.toInt(), dp(16), AQUA, dp(3)))
+        setOnClickListener { onOpen() }
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = title; textSize = 16f; setTextColor(NAVY); typeface = Typeface.DEFAULT_BOLD
+                setSingleLine(); ellipsize = TextUtils.TruncateAt.END })
+            addView(TextView(this@MainActivity).apply {
+                text = sub; textSize = 12f; setTextColor(MUTED)
+                setSingleLine(); ellipsize = TextUtils.TruncateAt.END })
+        }, lp(0, WRAP_CONTENT, wt = 1f))
+        addView(TextView(this@MainActivity).apply {
+            text = "✕"; textSize = 18f; setTextColor(MUTED); gravity = Gravity.CENTER
+            isFocusable = true; isClickable = true; setPadding(dp(14), dp(8), dp(14), dp(8))
+            background = focusable(shape(Color.TRANSPARENT, dp(20)), shape(Color.WHITE, dp(20), AQUA, dp(2)))
+            setOnClickListener { onDelete() }
+        })
+    }
+
     private fun showFavorites() {
         val list = favs.all()
-        if (list.isEmpty()) { toast("No favorites yet. Enter a URL and tap ★ Save."); return }
         lateinit var dlg: AlertDialog
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)) }
+        val col = column()
+        if (list.isEmpty()) col.addView(empty("No favorites yet.\nTap ★ Save, or use Import below."))
         list.forEach { f ->
-            val card = LinearLayout(this).apply {
-                gravity = Gravity.CENTER_VERTICAL; isFocusable = true; isClickable = true
-                setPadding(dp(16), dp(12), dp(8), dp(12))
-                background = focusable(shape(TINT, dp(16)), shape(0xFFD3EBFA.toInt(), dp(16), AQUA, dp(3)))
-                setOnClickListener { dlg.dismiss(); go(f.url) }
-                addView(LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    addView(TextView(this@MainActivity).apply {
-                        text = f.name; textSize = 16f; setTextColor(NAVY); typeface = Typeface.DEFAULT_BOLD
-                        setSingleLine(); ellipsize = TextUtils.TruncateAt.END })
-                    addView(TextView(this@MainActivity).apply {
-                        text = f.url; textSize = 12f; setTextColor(MUTED)
-                        setSingleLine(); ellipsize = TextUtils.TruncateAt.END })
-                }, lp(0, WRAP_CONTENT, wt = 1f))
-                addView(TextView(this@MainActivity).apply {
-                    text = "✕"; textSize = 18f; setTextColor(MUTED); gravity = Gravity.CENTER
-                    isFocusable = true; isClickable = true; setPadding(dp(14), dp(8), dp(14), dp(8))
-                    background = focusable(shape(Color.TRANSPARENT, dp(20)), shape(Color.WHITE, dp(20), AQUA, dp(2)))
-                    setOnClickListener {
-                        AlertDialog.Builder(this@MainActivity).setMessage("Delete \"${f.name}\"?")
-                            .setPositiveButton("Delete") { _, _ -> favs.remove(f); dlg.dismiss(); showFavorites() }
-                            .setNegativeButton("Cancel", null).show()
-                    }
-                })
-            }
-            col.addView(card, lp(MATCH_PARENT, WRAP_CONTENT, b = 12))
+            col.addView(card(f.name, f.url,
+                { dlg.dismiss(); go(f.url) },
+                { confirm("Delete \"${f.name}\"?") { favs.remove(f); dlg.dismiss(); showFavorites() } }),
+                lp(MATCH_PARENT, WRAP_CONTENT, b = 12))
         }
         dlg = AlertDialog.Builder(this).setTitle("★ Favorites")
             .setView(ScrollView(this).apply { addView(col) })
+            .setNeutralButton("Import") { _, _ -> showImport() }
             .setNegativeButton("Close", null).show()
+    }
+
+    // ---- Downloads ----
+    private fun showDownloads() {
+        val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)!!
+        val files = dir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() } ?: emptyList()
+        lateinit var dlg: AlertDialog
+        val col = column()
+        if (files.isEmpty()) col.addView(empty("No downloads yet."))
+        files.forEach { f ->
+            val sub = "${Formatter.formatShortFileSize(this, f.length())} · ${DateUtils.getRelativeTimeSpanString(f.lastModified())}"
+            col.addView(card(f.name, sub,
+                { dlg.dismiss(); openFile(f) },
+                { confirm("Delete ${f.name}?") { f.delete(); dlg.dismiss(); showDownloads() } }),
+                lp(MATCH_PARENT, WRAP_CONTENT, b = 12))
+        }
+        val b = AlertDialog.Builder(this).setTitle("Downloads")
+            .setView(ScrollView(this).apply { addView(col) })
+            .setNegativeButton("Close", null)
+        if (files.isNotEmpty()) b.setNeutralButton("Delete all") { _, _ ->
+            confirm("Delete all ${files.size} files?") { files.forEach { it.delete() }; toast("Downloads cleared") }
+        }
+        dlg = b.show()
+    }
+
+    private fun openFile(f: File) {
+        if (f.extension.equals("apk", true)) { installApk(f); return }
+        val uri = FileProvider.getUriForFile(this, "$packageName.provider", f)
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase()) ?: "*/*"
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        } catch (e: ActivityNotFoundException) { toast("No app can open this file") }
+    }
+
+    private fun installApk(f: File) {
+        if (canInstall()) Downloads.install(this, f)
+        else { pending = f; status.text = "Allow installs, then return to SideLoader"; openInstallSettings() }
     }
 
     // ---- Import (text file or URL) ----
@@ -269,10 +334,7 @@ class MainActivity : Activity() {
             { r -> runOnUiThread {
                 r.onSuccess { f ->
                     status.text = "Saved ${f.name}"
-                    if (f.extension.equals("apk", true)) {
-                        if (canInstall()) Downloads.install(this, f)
-                        else { pending = f; status.text = "Allow installs, then return to SideLoader"; openInstallSettings() }
-                    }
+                    if (f.extension.equals("apk", true)) installApk(f)
                 }.onFailure { status.text = "Failed: ${it.message}" }
             } })
     }
