@@ -51,6 +51,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var favs: Favorites
     private val pickFile = 1
+    private val saveFile = 2
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun lp(w: Int, h: Int, l: Int = 0, t: Int = 0, r: Int = 0, b: Int = 0, wt: Float = 0f) =
@@ -232,8 +233,9 @@ class MainActivity : Activity() {
         }
         dlg = AlertDialog.Builder(this).setTitle("★ Favorites")
             .setView(ScrollView(this).apply { addView(col) })
-            .setNeutralButton("Import") { _, _ -> showImport() }
-            .setNegativeButton("Close", null).show()
+            .setNeutralButton("Close", null)
+            .setNegativeButton("Import") { _, _ -> showImport() }
+            .setPositiveButton("Export") { _, _ -> showExport() }.show()
     }
 
     // ---- Downloads ----
@@ -295,10 +297,16 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data ?: return
-        if (requestCode != pickFile || resultCode != RESULT_OK) return
-        runCatching { contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() } }
-            .onSuccess { importText(it) }
-            .onFailure { toast("Could not read file: ${it.message}") }
+        if (resultCode != RESULT_OK) return
+        if (requestCode == saveFile) {
+            runCatching { contentResolver.openOutputStream(uri, "wt")!!.bufferedWriter().use { it.write(favoritesText()) } }
+                .onSuccess { toast("Exported ${favs.all().size} favorites") }
+                .onFailure { toast("Export failed: ${it.message}") }
+        } else if (requestCode == pickFile) {
+            runCatching { contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() } }
+                .onSuccess { importText(it) }
+                .onFailure { toast("Could not read file: ${it.message}") }
+        }
     }
 
     private fun askImportUrl() {
@@ -317,6 +325,31 @@ class MainActivity : Activity() {
                         .onFailure { runOnUiThread { toast("Import failed: ${it.message}") } }
                 }.start()
             }.setNegativeButton("Cancel", null).show()
+    }
+
+    // ---- Export (same "Name | URL" format that Import reads) ----
+    private fun favoritesText() = "# SideLoader favorites\n" +
+        favs.all().joinToString("\n") { "${it.name} | ${it.url}" } + "\n"
+
+    private fun showExport() {
+        if (favs.all().isEmpty()) { toast("No favorites to export"); return }
+        AlertDialog.Builder(this).setTitle("Export favorites")
+            .setItems(arrayOf("Save to a file", "Save to Downloads folder")) { _, i ->
+                if (i == 0) {
+                    try {
+                        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE).setType("text/plain")
+                            .putExtra(Intent.EXTRA_TITLE, "sideloader-favorites.txt"), saveFile)
+                    } catch (e: ActivityNotFoundException) {
+                        toast("No file picker on this device. Use \"Save to Downloads folder\" instead.")
+                    }
+                } else {
+                    val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)!!
+                    runCatching { File(dir, "sideloader-favorites.txt").writeText(favoritesText()) }
+                        .onSuccess { toast("Saved sideloader-favorites.txt to Downloads") }
+                        .onFailure { toast("Export failed: ${it.message}") }
+                }
+            }.show()
     }
 
     private fun importText(text: String) {
